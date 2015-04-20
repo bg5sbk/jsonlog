@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type L struct {
 	dir       string
 	logChan   chan M
 	closeChan chan int
+	closeWait sync.WaitGroup
 	out       *bufio.Writer
 	encoder   *json.Encoder
 	file      *os.File
@@ -68,10 +70,14 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 	}
 	logger.switchFile(switchMode, fileType)
 
+	logger.closeWait.Add(1)
 	go func() {
 		// 每两秒刷新一次
 		flushTicker := time.NewTicker(2 * time.Second)
-		defer flushTicker.Stop()
+		defer func() {
+			flushTicker.Stop()
+			logger.closeWait.Done()
+		}()
 		for {
 			select {
 			case r := <-logger.logChan:
@@ -147,6 +153,7 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string) {
 // 关闭日志系统
 func (logger *L) Close() {
 	close(logger.closeChan)
+	logger.closeWait.Wait()
 }
 
 // 在日志文件中输出信息
