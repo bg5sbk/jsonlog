@@ -41,12 +41,6 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 		}
 	}
 
-	logChan := make(chan M, 1000)
-	closeChan := make(chan int)
-
-	// 每两秒刷新一次
-	flushTimer := time.NewTicker(2 * time.Second)
-
 	// 日志切换的时间模式
 	var fileTimer *time.Timer
 	now := time.Now()
@@ -66,23 +60,27 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 	}
 
 	logger := &L{
-		dir:     dir,
-		logChan: logChan,
+		dir:       dir,
+		closeChan: make(chan int),
+		logChan:   make(chan M, 1000),
 	}
 	logger.switchFile(switchMode)
 
 	go func() {
+		// 每两秒刷新一次
+		flushTicker := time.NewTicker(2 * time.Second)
+		defer flushTicker.Stop()
 		for {
 			select {
-			case r := <-logChan:
+			case r := <-logger.logChan:
 				if err := logger.encoder.Encode(r); err != nil {
 					log.Println("log failed:", err.Error())
 				}
-			case <-flushTimer.C:
+			case <-flushTicker.C:
 				logger.out.Flush()
 			case <-fileTimer.C:
 				fileTimer = logger.switchFile(switchMode)
-			case <-closeChan:
+			case <-logger.closeChan:
 				logger.out.Flush()
 				logger.file.Close()
 				return
@@ -101,35 +99,35 @@ func (logger *L) switchFile(switchMode SwitchMode) *time.Timer {
 	}
 
 	var (
-		err     error
-		logName string
-		timer   *time.Timer
+		fileName string
+		timer    *time.Timer
 	)
 
 	switch switchMode {
 	case SWITCH_BY_DAY:
-		logName = logger.dir + "/" + time.Now().Format("2006-01-02") + ".log"
+		fileName = logger.dir + "/" + time.Now().Format("2006-01-02") + ".log"
 		timer = time.NewTimer(24 * time.Hour)
 	case SWITCH_BY_HOURS:
-		logName = logger.dir + "/" + time.Now().Format("2006-01-02") + "/"
-		if _, err := os.Stat(logName); err != nil {
+		fileName = logger.dir + "/" + time.Now().Format("2006-01-02") + "/"
+		if _, err := os.Stat(fileName); err != nil {
 			if os.IsNotExist(err) {
-				if err := os.Mkdir(logName, 0644); err != nil {
+				if err := os.Mkdir(fileName, 0644); err != nil {
 					panic(err)
 				}
 			} else {
 				panic(err)
 			}
 		}
-		logName += strconv.Itoa(time.Now().Hour()) + ".log"
+		fileName += strconv.Itoa(time.Now().Hour()) + ".log"
 		timer = time.NewTimer(time.Hour)
 	}
 
-	logger.file, err = os.OpenFile(logName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		panic(err)
 	}
 
+	logger.file = file
 	logger.out = bufio.NewWriter(logger.file)
 	logger.encoder = json.NewEncoder(logger.out)
 
