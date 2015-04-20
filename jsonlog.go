@@ -3,9 +3,9 @@ package jsonlog
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"time"
 )
 
@@ -29,7 +29,7 @@ type L struct {
 }
 
 // 新建一个日志记录器
-func New(dir string, switchMode SwitchMode) (*L, error) {
+func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 	// 目录不存在就创建一个
 	if _, err := os.Stat(dir); err != nil {
 		if os.IsNotExist(err) {
@@ -41,9 +41,11 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 		}
 	}
 
-	// 日志切换的时间模式
-	var fileTimer *time.Timer
-	now := time.Now()
+	var (
+		fileTimer *time.Timer
+		now       = time.Now()
+	)
+
 	switch switchMode {
 	case SWITCH_BY_DAY:
 		// 计算此刻到第二天零点的时间
@@ -64,7 +66,7 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 		closeChan: make(chan int),
 		logChan:   make(chan M, 1000),
 	}
-	logger.switchFile(switchMode)
+	logger.switchFile(switchMode, fileType)
 
 	go func() {
 		// 每两秒刷新一次
@@ -79,7 +81,7 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 			case <-flushTicker.C:
 				logger.out.Flush()
 			case <-fileTimer.C:
-				logger.switchFile(switchMode)
+				logger.switchFile(switchMode, fileType)
 				switch switchMode {
 				case SWITCH_BY_DAY:
 					fileTimer = time.NewTimer(24 * time.Hour)
@@ -98,36 +100,45 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 }
 
 // 切换文件
-func (logger *L) switchFile(switchMode SwitchMode) {
-	if logger.file != nil {
-		logger.out.Flush()
-		logger.file.Close()
-	}
+func (logger *L) switchFile(switchMode SwitchMode, fileType string) {
+	var (
+		dirName  string
+		fileName string
+		now      = time.Now()
+	)
 
-	var fileName string
-
+	// 确定目录名和文件名
 	switch switchMode {
 	case SWITCH_BY_DAY:
-		fileName = logger.dir + "/" + time.Now().Format("2006-01-02") + ".log"
+		dirName = logger.dir + "/" + now.Format("2006-01") + "/"
+		fileName = dirName + fmt.Sprintf("%02d", now.Day()) + fileType
 	case SWITCH_BY_HOURS:
-		fileName = logger.dir + "/" + time.Now().Format("2006-01-02") + "/"
-		if _, err := os.Stat(fileName); err != nil {
-			if os.IsNotExist(err) {
-				if err := os.Mkdir(fileName, 0644); err != nil {
-					panic(err)
-				}
-			} else {
-				panic(err)
-			}
-		}
-		fileName += strconv.Itoa(time.Now().Hour()) + ".log"
+		dirName = logger.dir + "/" + now.Format("2006-01-02") + "/"
+		fileName = dirName + fmt.Sprintf("%02d", now.Hour()) + fileType
 	}
 
+	// 确认目录存在，否则就创建一个
+	if _, err := os.Stat(dirName); err != nil {
+		if os.IsNotExist(err) {
+			if err := os.Mkdir(dirName, 0644); err != nil {
+				panic(err)
+			}
+		} else {
+			panic(err)
+		}
+	}
+
+	// 创建或者打开已存在文件
 	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		panic(err)
 	}
 
+	// 先关闭旧文件再切换
+	if logger.file != nil {
+		logger.out.Flush()
+		logger.file.Close()
+	}
 	logger.file = file
 	logger.out = bufio.NewWriter(logger.file)
 	logger.encoder = json.NewEncoder(logger.out)
