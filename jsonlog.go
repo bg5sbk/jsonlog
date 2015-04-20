@@ -3,6 +3,7 @@ package jsonlog
 import (
 	"bufio"
 	"encoding/json"
+	"log"
 	"os"
 	"strconv"
 	"time"
@@ -75,7 +76,7 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 			select {
 			case r := <-logChan:
 				if err := logger.encoder.Encode(r); err != nil {
-					println("log failed:", err.Error())
+					log.Println("log failed:", err.Error())
 				}
 			case <-flushTimer.C:
 				logger.out.Flush()
