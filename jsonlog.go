@@ -43,41 +43,45 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 		}
 	}
 
-	var (
-		fileTimer *time.Timer
-		now       = time.Now()
-	)
-
-	switch switchMode {
-	case SWITCH_BY_DAY:
-		// 计算此刻到第二天零点的时间
-		fileTimer = time.NewTimer(time.Date(
-			now.Year(), now.Month(), now.Day(),
-			0, 0, 0, 0, now.Location(),
-		).Add(24 * time.Hour).Sub(now))
-	case SWITCH_BY_HOURS:
-		// 计算此刻到下一个小时的时间
-		fileTimer = time.NewTimer(time.Date(
-			now.Year(), now.Month(), now.Day(),
-			now.Hour(), 0, 0, 0, now.Location(),
-		).Add(time.Hour).Sub(now))
-	}
-
 	logger := &L{
 		dir:       dir,
 		closeChan: make(chan int),
 		logChan:   make(chan M, 1000),
 	}
-	logger.switchFile(switchMode, fileType)
+	if err := logger.switchFile(switchMode, fileType); err != nil {
+		return nil, err
+	}
 
 	logger.closeWait.Add(1)
 	go func() {
+		var (
+			fileTimer *time.Timer
+			now       = time.Now()
+		)
+		switch switchMode {
+		case SWITCH_BY_DAY:
+			// 计算此刻到第二天零点的时间
+			fileTimer = time.NewTimer(time.Date(
+				now.Year(), now.Month(), now.Day(),
+				0, 0, 0, 0, now.Location(),
+			).Add(24 * time.Hour).Sub(now))
+		case SWITCH_BY_HOURS:
+			// 计算此刻到下一个小时的时间
+			fileTimer = time.NewTimer(time.Date(
+				now.Year(), now.Month(), now.Day(),
+				now.Hour(), 0, 0, 0, now.Location(),
+			).Add(time.Hour).Sub(now))
+		}
+
 		// 每两秒刷新一次
 		flushTicker := time.NewTicker(2 * time.Second)
 		defer func() {
+			logger.out.Flush()
+			logger.file.Close()
 			flushTicker.Stop()
 			logger.closeWait.Done()
 		}()
+
 		for {
 			select {
 			case r := <-logger.logChan:
@@ -87,7 +91,9 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 			case <-flushTicker.C:
 				logger.out.Flush()
 			case <-fileTimer.C:
-				logger.switchFile(switchMode, fileType)
+				if err := logger.switchFile(switchMode, fileType); err != nil {
+					panic(err)
+				}
 				switch switchMode {
 				case SWITCH_BY_DAY:
 					fileTimer = time.NewTimer(24 * time.Hour)
@@ -95,8 +101,6 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 					fileTimer = time.NewTimer(time.Hour)
 				}
 			case <-logger.closeChan:
-				logger.out.Flush()
-				logger.file.Close()
 				return
 			}
 		}
@@ -106,7 +110,7 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 }
 
 // 切换文件
-func (logger *L) switchFile(switchMode SwitchMode, fileType string) {
+func (logger *L) switchFile(switchMode SwitchMode, fileType string) error {
 	var (
 		dirName  string
 		fileName string
@@ -127,27 +131,33 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string) {
 	if _, err := os.Stat(dirName); err != nil {
 		if os.IsNotExist(err) {
 			if err := os.Mkdir(dirName, 0644); err != nil {
-				panic(err)
+				return err
 			}
 		} else {
-			panic(err)
+			return err
 		}
 	}
 
 	// 创建或者打开已存在文件
 	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	// 先关闭旧文件再切换
 	if logger.file != nil {
-		logger.out.Flush()
-		logger.file.Close()
+		if err := logger.out.Flush(); err != nil {
+			return err
+		}
+		if err := logger.file.Close(); err != nil {
+			return err
+		}
 	}
 	logger.file = file
 	logger.out = bufio.NewWriter(logger.file)
 	logger.encoder = json.NewEncoder(logger.out)
+
+	return nil
 }
 
 // 关闭日志系统
