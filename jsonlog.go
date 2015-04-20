@@ -76,9 +76,9 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 		// 每两秒刷新一次
 		flushTicker := time.NewTicker(2 * time.Second)
 		defer func() {
+			flushTicker.Stop()
 			logger.out.Flush()
 			logger.file.Close()
-			flushTicker.Stop()
 			logger.closeWait.Done()
 		}()
 
