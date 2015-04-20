@@ -79,7 +79,13 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 			case <-flushTicker.C:
 				logger.out.Flush()
 			case <-fileTimer.C:
-				fileTimer = logger.switchFile(switchMode)
+				logger.switchFile(switchMode)
+				switch switchMode {
+				case SWITCH_BY_DAY:
+					fileTimer = time.NewTimer(24 * time.Hour)
+				case SWITCH_BY_HOURS:
+					fileTimer = time.NewTimer(time.Hour)
+				}
 			case <-logger.closeChan:
 				logger.out.Flush()
 				logger.file.Close()
@@ -92,21 +98,17 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 }
 
 // 切换文件
-func (logger *L) switchFile(switchMode SwitchMode) *time.Timer {
+func (logger *L) switchFile(switchMode SwitchMode) {
 	if logger.file != nil {
 		logger.out.Flush()
 		logger.file.Close()
 	}
 
-	var (
-		fileName string
-		timer    *time.Timer
-	)
+	var fileName string
 
 	switch switchMode {
 	case SWITCH_BY_DAY:
 		fileName = logger.dir + "/" + time.Now().Format("2006-01-02") + ".log"
-		timer = time.NewTimer(24 * time.Hour)
 	case SWITCH_BY_HOURS:
 		fileName = logger.dir + "/" + time.Now().Format("2006-01-02") + "/"
 		if _, err := os.Stat(fileName); err != nil {
@@ -119,7 +121,6 @@ func (logger *L) switchFile(switchMode SwitchMode) *time.Timer {
 			}
 		}
 		fileName += strconv.Itoa(time.Now().Hour()) + ".log"
-		timer = time.NewTimer(time.Hour)
 	}
 
 	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
@@ -130,8 +131,6 @@ func (logger *L) switchFile(switchMode SwitchMode) *time.Timer {
 	logger.file = file
 	logger.out = bufio.NewWriter(logger.file)
 	logger.encoder = json.NewEncoder(logger.out)
-
-	return timer
 }
 
 // 关闭日志系统
