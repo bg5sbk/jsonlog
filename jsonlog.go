@@ -71,7 +71,6 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 	logger.switchFile(switchMode)
 
 	go func() {
-	L:
 		for {
 			select {
 			case r := <-logChan:
@@ -85,7 +84,7 @@ func New(dir string, switchMode SwitchMode) (*L, error) {
 			case <-closeChan:
 				logger.out.Flush()
 				logger.file.Close()
-				break L
+				return
 			}
 		}
 	}()
