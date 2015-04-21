@@ -2,6 +2,7 @@ package jsonlog
 
 import (
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -19,19 +20,24 @@ const (
 
 type M map[string]interface{}
 
+type flushWriter interface {
+	Write(data []byte) (n int, err error)
+	Flush() error
+}
+
 // 日志记录器
 type L struct {
 	dir       string
 	logChan   chan M
 	closeChan chan int
 	closeWait sync.WaitGroup
-	out       *bufio.Writer
+	out       flushWriter
 	encoder   *json.Encoder
 	file      *os.File
 }
 
 // 新建一个日志记录器
-func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
+func New(dir string, switchMode SwitchMode, fileType string, compress bool) (*L, error) {
 	// 目录不存在就创建一个
 	if _, err := os.Stat(dir); err != nil {
 		if os.IsNotExist(err) {
@@ -43,12 +49,16 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 		}
 	}
 
+	if compress {
+		fileType += ".gz"
+	}
+
 	logger := &L{
 		dir:       dir,
 		closeChan: make(chan int),
 		logChan:   make(chan M, 1000),
 	}
-	if err := logger.switchFile(switchMode, fileType); err != nil {
+	if err := logger.switchFile(switchMode, fileType, compress); err != nil {
 		return nil, err
 	}
 
@@ -91,7 +101,7 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 			case <-flushTicker.C:
 				logger.out.Flush()
 			case <-fileTimer.C:
-				if err := logger.switchFile(switchMode, fileType); err != nil {
+				if err := logger.switchFile(switchMode, fileType, compress); err != nil {
 					panic(err)
 				}
 				switch switchMode {
@@ -110,7 +120,7 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 }
 
 // 切换文件
-func (logger *L) switchFile(switchMode SwitchMode, fileType string) error {
+func (logger *L) switchFile(switchMode SwitchMode, fileType string, compress bool) error {
 	var (
 		dirName  string
 		fileName string
@@ -154,7 +164,11 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string) error {
 		}
 	}
 	logger.file = file
-	logger.out = bufio.NewWriter(logger.file)
+	if compress {
+		logger.out, _ = gzip.NewWriterLevel(bufio.NewWriter(logger.file), 9)
+	} else {
+		logger.out = bufio.NewWriter(logger.file)
+	}
 	logger.encoder = json.NewEncoder(logger.out)
 
 	return nil
