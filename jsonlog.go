@@ -44,13 +44,14 @@ func openLogFile(fileName, fileType string, compress bool) (*logFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := bufio.NewWriter(f)
-	log := &logFile{f: f, bufio: b}
+	log := &logFile{f: f}
 	if compress {
-		log.gzip = gzip.NewWriter(b)
-		log.json = json.NewEncoder(log.gzip)
+		log.gzip = gzip.NewWriter(log.f)
+		log.bufio = bufio.NewWriter(log.gzip)
+		log.json = json.NewEncoder(log.bufio)
 	} else {
-		log.json = json.NewEncoder(b)
+		log.bufio = bufio.NewWriter(log.f)
+		log.json = json.NewEncoder(log.bufio)
 	}
 	return log, nil
 }
@@ -184,7 +185,7 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string, compress boo
 		fileName = dirName + now.Format("2006-01-02")
 	case SWITCH_BY_HOURS:
 		dirName = logger.dir + "/" + now.Format("2006-01/2006-01-02/")
-		fileName = dirName + now.Format("2006-01-02 03:00")
+		fileName = dirName + now.Format("2006-01-02_03")
 	}
 
 	// 确认目录存在
