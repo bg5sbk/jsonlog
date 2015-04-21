@@ -35,7 +35,7 @@ func New(dir string, switchMode SwitchMode, fileType string) (*L, error) {
 	// 目录不存在就创建一个
 	if _, err := os.Stat(dir); err != nil {
 		if os.IsNotExist(err) {
-			if err := os.Mkdir(dir, 0644); err != nil {
+			if err := os.Mkdir(dir, 0755); err != nil {
 				return nil, err
 			}
 		} else {
@@ -130,7 +130,7 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string) error {
 	// 确认目录存在，否则就创建一个
 	if _, err := os.Stat(dirName); err != nil {
 		if os.IsNotExist(err) {
-			if err := os.Mkdir(dirName, 0644); err != nil {
+			if err := os.Mkdir(dirName, 0755); err != nil {
 				return err
 			}
 		} else {
@@ -139,7 +139,7 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string) error {
 	}
 
 	// 创建或者打开已存在文件
-	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
 	if err != nil {
 		return err
 	}
