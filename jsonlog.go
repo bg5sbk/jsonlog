@@ -20,9 +20,66 @@ const (
 
 type M map[string]interface{}
 
-type flushWriter interface {
-	Write(data []byte) (n int, err error)
-	Flush() error
+type logFile struct {
+	f     *os.File
+	bufio *bufio.Writer
+	gzip  *gzip.Writer
+	json  *json.Encoder
+}
+
+func openLogFile(fileName, fileType string, compress bool) (*logFile, error) {
+	fullName := fileName + fileType
+	if _, err := os.Stat(fullName); err == nil {
+		os.Rename(fullName, fileName+".01"+fileType)
+		fullName = fileName + ".02" + fileType
+	} else if _, err := os.Stat(fileName + ".01" + fileType); err == nil {
+		for fileId := 1; true; fileId++ {
+			fullName = fileName + fmt.Sprintf(".%02d", fileId) + fileType
+			if _, err := os.Stat(fullName); err != nil {
+				break
+			}
+		}
+	}
+	f, err := os.OpenFile(fullName, os.O_WRONLY|os.O_CREATE, 0755)
+	if err != nil {
+		return nil, err
+	}
+	b := bufio.NewWriter(f)
+	log := &logFile{f: f, bufio: b}
+	if compress {
+		log.gzip = gzip.NewWriter(b)
+		log.json = json.NewEncoder(log.gzip)
+	} else {
+		log.json = json.NewEncoder(b)
+	}
+	return log, nil
+}
+
+func (file *logFile) Write(r M) {
+	if err := file.json.Encode(r); err != nil {
+		log.Println("log write failed:", err.Error())
+	}
+}
+
+func (file *logFile) Flush() error {
+	if file.gzip != nil {
+		if err := file.gzip.Flush(); err != nil {
+			return err
+		}
+	}
+	return file.bufio.Flush()
+}
+
+func (file *logFile) Close() error {
+	if err := file.Flush(); err != nil {
+		return err
+	}
+	if file.gzip != nil {
+		if err := file.gzip.Close(); err != nil {
+			return err
+		}
+	}
+	return file.f.Close()
 }
 
 // 日志记录器
@@ -31,24 +88,11 @@ type L struct {
 	logChan   chan M
 	closeChan chan int
 	closeWait sync.WaitGroup
-	out       flushWriter
-	encoder   *json.Encoder
-	file      *os.File
+	file      *logFile
 }
 
 // 新建一个日志记录器
 func New(dir string, switchMode SwitchMode, fileType string, compress bool) (*L, error) {
-	// 目录不存在就创建一个
-	if _, err := os.Stat(dir); err != nil {
-		if os.IsNotExist(err) {
-			if err := os.Mkdir(dir, 0755); err != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
-	}
-
 	if compress {
 		fileType += ".gz"
 	}
@@ -87,7 +131,6 @@ func New(dir string, switchMode SwitchMode, fileType string, compress bool) (*L,
 		flushTicker := time.NewTicker(2 * time.Second)
 		defer func() {
 			flushTicker.Stop()
-			logger.out.Flush()
 			logger.file.Close()
 			logger.closeWait.Done()
 		}()
@@ -95,11 +138,11 @@ func New(dir string, switchMode SwitchMode, fileType string, compress bool) (*L,
 		for {
 			select {
 			case r := <-logger.logChan:
-				if err := logger.encoder.Encode(r); err != nil {
-					log.Println("log failed:", err.Error())
-				}
+				logger.file.Write(r)
 			case <-flushTicker.C:
-				logger.out.Flush()
+				if err := logger.file.Flush(); err != nil {
+					log.Println("log flush failed:", err.Error())
+				}
 			case <-fileTimer.C:
 				if err := logger.switchFile(switchMode, fileType, compress); err != nil {
 					panic(err)
@@ -111,7 +154,14 @@ func New(dir string, switchMode SwitchMode, fileType string, compress bool) (*L,
 					fileTimer = time.NewTimer(time.Hour)
 				}
 			case <-logger.closeChan:
-				return
+				for {
+					select {
+					case r := <-logger.logChan:
+						logger.file.Write(r)
+					default:
+						return
+					}
+				}
 			}
 		}
 	}()
@@ -130,46 +180,31 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string, compress boo
 	// 确定目录名和文件名
 	switch switchMode {
 	case SWITCH_BY_DAY:
-		dirName = logger.dir + "/" + now.Format("2006-01") + "/"
-		fileName = dirName + fmt.Sprintf("%02d", now.Day()) + fileType
+		dirName = logger.dir + "/" + now.Format("2006-01/")
+		fileName = dirName + now.Format("2006-01-02")
 	case SWITCH_BY_HOURS:
-		dirName = logger.dir + "/" + now.Format("2006-01-02") + "/"
-		fileName = dirName + fmt.Sprintf("%02d", now.Hour()) + fileType
+		dirName = logger.dir + "/" + now.Format("2006-01/2006-01-02/")
+		fileName = dirName + now.Format("2006-01-02 03:00")
 	}
 
-	// 确认目录存在，否则就创建一个
-	if _, err := os.Stat(dirName); err != nil {
-		if os.IsNotExist(err) {
-			if err := os.Mkdir(dirName, 0755); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-
-	// 创建或者打开已存在文件
-	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0755)
-	if err != nil {
+	// 确认目录存在
+	if err := os.MkdirAll(dirName, 0755); err != nil {
 		return err
 	}
 
 	// 先关闭旧文件再切换
 	if logger.file != nil {
-		if err := logger.out.Flush(); err != nil {
-			return err
-		}
 		if err := logger.file.Close(); err != nil {
 			return err
 		}
 	}
-	logger.file = file
-	if compress {
-		logger.out, _ = gzip.NewWriterLevel(bufio.NewWriter(logger.file), 9)
-	} else {
-		logger.out = bufio.NewWriter(logger.file)
+
+	// 创建或者打开已存在文件
+	file, err := openLogFile(fileName, fileType, compress)
+	if err != nil {
+		return err
 	}
-	logger.encoder = json.NewEncoder(logger.out)
+	logger.file = file
 
 	return nil
 }
