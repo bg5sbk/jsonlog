@@ -46,9 +46,9 @@ func openLogFile(fileName, fileType string, compress bool) (*logFile, error) {
 	}
 	log := &logFile{f: f}
 	if compress {
-		log.gzip = gzip.NewWriter(log.f)
-		log.bufio = bufio.NewWriter(log.gzip)
-		log.json = json.NewEncoder(log.bufio)
+		log.bufio = bufio.NewWriter(log.f)
+		log.gzip = gzip.NewWriter(log.bufio)
+		log.json = json.NewEncoder(log.gzip)
 	} else {
 		log.bufio = bufio.NewWriter(log.f)
 		log.json = json.NewEncoder(log.bufio)
@@ -72,13 +72,16 @@ func (file *logFile) Flush() error {
 }
 
 func (file *logFile) Close() error {
-	if err := file.Flush(); err != nil {
-		return err
-	}
 	if file.gzip != nil {
+		if err := file.gzip.Flush(); err != nil {
+			return err
+		}
 		if err := file.gzip.Close(); err != nil {
 			return err
 		}
+	}
+	if err := file.bufio.Flush(); err != nil {
+		return err
 	}
 	return file.f.Close()
 }
