@@ -7,18 +7,18 @@ gzip校验和丢失会导致gunzip或gzcat等程序提示文件损坏而拒绝�
 
 但是实际上文件损坏的部分只有末尾没写入完整的部分，gzip算法有能力解压前面完整的数据。
 
-所以我做了这个也叫做gzcat的工具，但是它和系统自带的gzcat不一样，它会尝试尽量的解压数据，直到gzip流解压失败。
+所以我做了这个也叫做gzdog的工具（一开始想叫gzcat但是名字被用了），它和系统自带的gzcat不一样的是它会尝试尽量的解压数据，直到gzip流解压失败。
 
-用法1，一次cat多个文件：
+用法1，一次多个文件：
 
 ```
-gzcat file1.log.gz file2.log.gz file3.log.gz
+gzdog file1.log.gz file2.log.gz file3.log.gz
 ```
 
 用法2，从标准输入读取数据并解压：
 
 ```
-gzcat < file1.log.gz
+gzdog < file1.log.gz
 ```
 
 默认会输出到标准输出，可以通过重定向输出把结果保存到文件。
