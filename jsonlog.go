@@ -21,10 +21,11 @@ const (
 type M map[string]interface{}
 
 type logFile struct {
-	f     *os.File
-	bufio *bufio.Writer
-	gzip  *gzip.Writer
-	json  *json.Encoder
+	f       *os.File
+	bufio   *bufio.Writer
+	gzip    *gzip.Writer
+	json    *json.Encoder
+	changed bool
 }
 
 func openLogFile(fileName, fileType string, compress bool) (*logFile, error) {
@@ -60,9 +61,13 @@ func (file *logFile) Write(r M) {
 	if err := file.json.Encode(r); err != nil {
 		log.Println("log write failed:", err.Error())
 	}
+	file.changed = true
 }
 
 func (file *logFile) Flush() error {
+	if !file.changed {
+		return nil
+	}
 	if file.gzip != nil {
 		if err := file.gzip.Flush(); err != nil {
 			return err
