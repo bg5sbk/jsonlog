@@ -68,7 +68,10 @@ func (file *logFile) Flush() error {
 			return err
 		}
 	}
-	return file.bufio.Flush()
+	if err := file.bufio.Flush(); err != nil {
+		return err
+	}
+	return file.f.Sync()
 }
 
 func (file *logFile) Close() error {
@@ -81,6 +84,9 @@ func (file *logFile) Close() error {
 		}
 	}
 	if err := file.bufio.Flush(); err != nil {
+		return err
+	}
+	if err := file.f.Sync(); err != nil {
 		return err
 	}
 	return file.f.Close()
