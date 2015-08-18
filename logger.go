@@ -9,7 +9,7 @@ import (
 
 type Config struct {
 	Dir         string
-	SwitchMode  SwitchMode
+	Switcher    Switcher
 	FileType    string
 	Compress    bool
 	FlushTick   time.Duration
@@ -67,7 +67,7 @@ func (logger *L) loop() {
 		}
 	}()
 
-	fileTimer := time.NewTimer(logger.config.SwitchMode.FirstSwitchTime())
+	fileTimer := time.NewTimer(logger.config.Switcher.FirstSwitchTime())
 
 	// 定时刷新
 	flushTicker := time.NewTicker(logger.config.FlushTick)
@@ -86,7 +86,7 @@ func (logger *L) loop() {
 				println("jsonlog switch file failed: " + err.Error())
 				panic(err)
 			}
-			fileTimer.Reset(logger.config.SwitchMode.NextSwitchTime())
+			fileTimer.Reset(logger.config.Switcher.NextSwitchTime())
 		case <-logger.closeChan:
 			for {
 				select {
@@ -102,7 +102,7 @@ func (logger *L) loop() {
 
 // 切换文件
 func (logger *L) switchFile() error {
-	dir, fileName := logger.config.SwitchMode.DirAndFileName(logger.config.Dir)
+	dir, fileName := logger.config.Switcher.DirAndFileName(logger.config.Dir)
 
 	// 确认目录存在
 	if err := os.MkdirAll(dir, 0755); err != nil {

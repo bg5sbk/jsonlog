@@ -9,7 +9,7 @@ var (
 	SWITCH_BY_HOURS = switchByHours{} // 按小时切换文件
 )
 
-type SwitchMode interface {
+type Switcher interface {
 	FirstSwitchTime() time.Duration
 	NextSwitchTime() time.Duration
 	DirAndFileName(base string) (dir, file string)
