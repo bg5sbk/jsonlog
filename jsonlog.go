@@ -11,12 +11,58 @@ import (
 	"time"
 )
 
-type SwitchMode int
+type SwitchMode interface {
+	FirstSwitchTime() time.Duration
+	NextSwitchTime() time.Duration
+	DirAndFileName(base string) (dir, file string)
+}
 
-const (
-	SWITCH_BY_DAY   SwitchMode = 1 // 按天切换文件
-	SWITCH_BY_HOURS SwitchMode = 2 // 按小时切换文件
+var (
+	SWITCH_BY_DAY   = switchByDay{}   // 按天切换文件
+	SWITCH_BY_HOURS = switchByHours{} // 按小时切换文件
 )
+
+type switchByDay struct{}
+
+func (_ switchByDay) FirstSwitchTime() time.Duration {
+	now := time.Now()
+	return time.Date(
+		now.Year(), now.Month(), now.Day(),
+		0, 0, 0, 0, now.Location(),
+	).Add(24 * time.Hour).Sub(now)
+}
+
+func (_ switchByDay) NextSwitchTime() time.Duration {
+	return 24 * time.Hour
+}
+
+func (_ switchByDay) DirAndFileName(base string) (dir, file string) {
+	now := time.Now()
+	dir = base + "/" + now.Format("2006-01/")
+	file = dir + now.Format("2006-01-02")
+	return
+}
+
+type switchByHours struct{}
+
+func (_ switchByHours) FirstSwitchTime() time.Duration {
+	now := time.Now()
+	return time.Date(
+		now.Year(), now.Month(), now.Day(),
+		now.Hour(), 0, 0, 0, now.Location(),
+	).Add(time.Hour).Sub(now)
+}
+
+func (_ switchByHours) NextSwitchTime() time.Duration {
+	return time.Hour
+}
+
+func (_ switchByHours) DirAndFileName(base string) (dir, file string) {
+	now := time.Now()
+	dir = base + "/" + now.Format("2006-01/2006-01-02/")
+	file = dir + now.Format("2006-01-02_03")
+	return
+}
 
 type M map[string]interface{}
 
@@ -64,7 +110,7 @@ func (file *logFile) Write(r M) {
 	file.changed = true
 }
 
-func (file *logFile) Flush() error {
+func (file *logFile) flush(isClose bool) error {
 	if !file.changed {
 		return nil
 	}
@@ -72,6 +118,11 @@ func (file *logFile) Flush() error {
 		if err := file.gzip.Flush(); err != nil {
 			return err
 		}
+		if isClose {
+			if err := file.gzip.Close(); err != nil {
+				return err
+			}
+		}
 	}
 	if err := file.bufio.Flush(); err != nil {
 		return err
@@ -79,32 +130,32 @@ func (file *logFile) Flush() error {
 	if err := file.f.Sync(); err != nil {
 		return err
 	}
-
 	file.changed = false
 	return nil
 }
 
+func (file *logFile) Flush() error {
+	return file.flush(false)
+}
+
 func (file *logFile) Close() error {
-	if file.gzip != nil {
-		if err := file.gzip.Flush(); err != nil {
-			return err
-		}
-		if err := file.gzip.Close(); err != nil {
-			return err
-		}
-	}
-	if err := file.bufio.Flush(); err != nil {
-		return err
-	}
-	if err := file.f.Sync(); err != nil {
+	if err := file.flush(true); err != nil {
 		return err
 	}
 	return file.f.Close()
 }
 
+type Config struct {
+	Dir        string
+	SwitchMode SwitchMode
+	FileType   string
+	Compress   bool
+	FlushTick  time.Duration
+}
+
 // 日志记录器
 type L struct {
-	dir       string
+	config    Config
 	logChan   chan M
 	closeChan chan int
 	closeWait sync.WaitGroup
@@ -112,103 +163,82 @@ type L struct {
 }
 
 // 新建一个日志记录器
-func New(dir string, switchMode SwitchMode, fileType string, compress bool) (*L, error) {
-	if compress {
-		fileType += ".gz"
+func New(config Config) (*L, error) {
+	if config.FileType[0] != '.' {
+		config.FileType = "." + config.FileType
+	}
+
+	if config.Compress {
+		config.FileType += ".gz"
+	}
+
+	if config.FlushTick <= 0 {
+		config.FlushTick = 2 * time.Second
 	}
 
 	logger := &L{
-		dir:       dir,
+		config:    config,
 		closeChan: make(chan int),
 		logChan:   make(chan M, 1000),
 	}
-	if err := logger.switchFile(switchMode, fileType, compress); err != nil {
+
+	if err := logger.switchFile(); err != nil {
 		return nil, err
 	}
 
 	logger.closeWait.Add(1)
-	go func() {
-		var (
-			fileTimer *time.Timer
-			now       = time.Now()
-		)
-		switch switchMode {
-		case SWITCH_BY_DAY:
-			// 计算此刻到第二天零点的时间
-			fileTimer = time.NewTimer(time.Date(
-				now.Year(), now.Month(), now.Day(),
-				0, 0, 0, 0, now.Location(),
-			).Add(24 * time.Hour).Sub(now))
-		case SWITCH_BY_HOURS:
-			// 计算此刻到下一个小时的时间
-			fileTimer = time.NewTimer(time.Date(
-				now.Year(), now.Month(), now.Day(),
-				now.Hour(), 0, 0, 0, now.Location(),
-			).Add(time.Hour).Sub(now))
-		}
-
-		// 每两秒刷新一次
-		flushTicker := time.NewTicker(2 * time.Second)
-		defer func() {
-			flushTicker.Stop()
-			logger.file.Close()
-			logger.closeWait.Done()
-		}()
-
-		for {
-			select {
-			case r := <-logger.logChan:
-				logger.file.Write(r)
-			case <-flushTicker.C:
-				if err := logger.file.Flush(); err != nil {
-					log.Println("log flush failed:", err.Error())
-				}
-			case <-fileTimer.C:
-				if err := logger.switchFile(switchMode, fileType, compress); err != nil {
-					panic(err)
-				}
-				switch switchMode {
-				case SWITCH_BY_DAY:
-					fileTimer = time.NewTimer(24 * time.Hour)
-				case SWITCH_BY_HOURS:
-					fileTimer = time.NewTimer(time.Hour)
-				}
-			case <-logger.closeChan:
-				for {
-					select {
-					case r := <-logger.logChan:
-						logger.file.Write(r)
-					default:
-						return
-					}
-				}
-			}
-		}
-	}()
+	go logger.loop()
 
 	return logger, nil
 }
 
-// 切换文件
-func (logger *L) switchFile(switchMode SwitchMode, fileType string, compress bool) error {
-	var (
-		dirName  string
-		fileName string
-		now      = time.Now()
-	)
+func (logger *L) loop() {
+	defer func() {
+		logger.closeWait.Done()
+		if logger.file != nil {
+			logger.file.Close()
+		}
+	}()
 
-	// 确定目录名和文件名
-	switch switchMode {
-	case SWITCH_BY_DAY:
-		dirName = logger.dir + "/" + now.Format("2006-01/")
-		fileName = dirName + now.Format("2006-01-02")
-	case SWITCH_BY_HOURS:
-		dirName = logger.dir + "/" + now.Format("2006-01/2006-01-02/")
-		fileName = dirName + now.Format("2006-01-02_03")
+	fileTimer := time.NewTimer(logger.config.SwitchMode.FirstSwitchTime())
+
+	// 定时刷新
+	flushTicker := time.NewTicker(logger.config.FlushTick)
+	defer flushTicker.Stop()
+
+	for {
+		select {
+		case r := <-logger.logChan:
+			logger.file.Write(r)
+		case <-flushTicker.C:
+			if err := logger.file.Flush(); err != nil {
+				log.Println("log flush failed:", err.Error())
+			}
+		case <-fileTimer.C:
+			if err := logger.switchFile(); err != nil {
+				println("jsonlog switch file failed: " + err.Error())
+				panic(err)
+			}
+			fileTimer.Reset(logger.config.SwitchMode.NextSwitchTime())
+		case <-logger.closeChan:
+			for {
+				select {
+				case r := <-logger.logChan:
+					logger.file.Write(r)
+				default:
+					return
+				}
+			}
+		}
 	}
+}
+
+// 切换文件
+func (logger *L) switchFile() error {
+	dir, fileName := logger.config.SwitchMode.DirAndFileName(logger.config.Dir)
 
 	// 确认目录存在
-	if err := os.MkdirAll(dirName, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
@@ -220,7 +250,7 @@ func (logger *L) switchFile(switchMode SwitchMode, fileType string, compress boo
 	}
 
 	// 创建或者打开已存在文件
-	file, err := openLogFile(fileName, fileType, compress)
+	file, err := openLogFile(fileName, logger.config.FileType, logger.config.Compress)
 	if err != nil {
 		return err
 	}
