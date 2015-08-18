@@ -23,6 +23,7 @@ type File struct {
 
 func NewFile(fileName, fileType string, compress bool) (*File, error) {
 	fullName := fileName + fileType
+
 	if _, err := os.Stat(fullName); err == nil {
 		os.Rename(fullName, fileName+".01"+fileType)
 		fullName = fileName + ".02" + fileType
@@ -34,10 +35,12 @@ func NewFile(fileName, fileType string, compress bool) (*File, error) {
 			}
 		}
 	}
+
 	f, err := os.OpenFile(fullName, os.O_WRONLY|os.O_CREATE, 0755)
 	if err != nil {
 		return nil, err
 	}
+
 	log := &File{f: f}
 	if compress {
 		log.bufio = bufio.NewWriter(log.f)
@@ -47,6 +50,7 @@ func NewFile(fileName, fileType string, compress bool) (*File, error) {
 		log.bufio = bufio.NewWriter(log.f)
 		log.json = json.NewEncoder(log.bufio)
 	}
+
 	return log, nil
 }
 
@@ -67,6 +71,7 @@ func (file *File) flush(isClose bool) error {
 	if !file.changed {
 		return nil
 	}
+
 	if file.gzip != nil {
 		if err := file.gzip.Flush(); err != nil {
 			return err
@@ -77,12 +82,15 @@ func (file *File) flush(isClose bool) error {
 			}
 		}
 	}
+
 	if err := file.bufio.Flush(); err != nil {
 		return err
 	}
+
 	if err := file.f.Sync(); err != nil {
 		return err
 	}
+
 	file.changed = false
 	return nil
 }

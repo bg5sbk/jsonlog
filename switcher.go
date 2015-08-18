@@ -18,6 +18,7 @@ type Switcher interface {
 type daySwitch struct{}
 
 func (_ daySwitch) FirstSwitchTime() time.Duration {
+	// 到明天凌晨间隔多长时间
 	now := time.Now()
 	return time.Date(
 		now.Year(), now.Month(), now.Day(),
@@ -39,6 +40,7 @@ func (_ daySwitch) DirAndFileName(base string) (dir, file string) {
 type hoursSwitch struct{}
 
 func (_ hoursSwitch) FirstSwitchTime() time.Duration {
+	// 到下一个整点间隔多长时间
 	now := time.Now()
 	return time.Date(
 		now.Year(), now.Month(), now.Day(),

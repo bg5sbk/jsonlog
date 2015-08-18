@@ -61,15 +61,16 @@ func New(config Config) (*L, error) {
 
 func (logger *L) loop() {
 	defer func() {
-		logger.closeWait.Done()
 		if logger.file != nil {
 			logger.file.Close()
 		}
+		logger.closeWait.Done()
 	}()
 
-	fileTimer := time.NewTimer(logger.config.Switcher.FirstSwitchTime())
+	// 定时切换文件
+	switchTimer := time.NewTimer(logger.config.Switcher.FirstSwitchTime())
 
-	// 定时刷新
+	// 定时刷新文件
 	flushTicker := time.NewTicker(logger.config.FlushTick)
 	defer flushTicker.Stop()
 
@@ -81,12 +82,12 @@ func (logger *L) loop() {
 			if err := logger.file.Flush(); err != nil {
 				log.Println("log flush failed:", err.Error())
 			}
-		case <-fileTimer.C:
+		case <-switchTimer.C:
 			if err := logger.switchFile(); err != nil {
 				println("jsonlog switch file failed: " + err.Error())
 				panic(err)
 			}
-			fileTimer.Reset(logger.config.Switcher.NextSwitchTime())
+			switchTimer.Reset(logger.config.Switcher.NextSwitchTime())
 		case <-logger.closeChan:
 			for {
 				select {
