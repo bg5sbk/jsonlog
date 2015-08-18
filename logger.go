@@ -22,7 +22,7 @@ type L struct {
 	logChan   chan M
 	closeChan chan int
 	closeWait sync.WaitGroup
-	file      *LogFile
+	file      *File
 }
 
 // 新建一个日志记录器
@@ -117,7 +117,7 @@ func (logger *L) switchFile() error {
 	}
 
 	// 创建或者打开已存在文件
-	file, err := NewLogFile(fileName, logger.config.FileType, logger.config.Compress)
+	file, err := NewFile(fileName, logger.config.FileType, logger.config.Compress)
 	if err != nil {
 		return err
 	}

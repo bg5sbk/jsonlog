@@ -12,7 +12,7 @@ import (
 
 type M map[string]interface{}
 
-type LogFile struct {
+type File struct {
 	mutex   sync.Mutex
 	f       *os.File
 	bufio   *bufio.Writer
@@ -21,7 +21,7 @@ type LogFile struct {
 	changed bool
 }
 
-func NewLogFile(fileName, fileType string, compress bool) (*LogFile, error) {
+func NewFile(fileName, fileType string, compress bool) (*File, error) {
 	fullName := fileName + fileType
 	if _, err := os.Stat(fullName); err == nil {
 		os.Rename(fullName, fileName+".01"+fileType)
@@ -38,7 +38,7 @@ func NewLogFile(fileName, fileType string, compress bool) (*LogFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	log := &LogFile{f: f}
+	log := &File{f: f}
 	if compress {
 		log.bufio = bufio.NewWriter(log.f)
 		log.gzip = gzip.NewWriter(log.bufio)
@@ -50,7 +50,7 @@ func NewLogFile(fileName, fileType string, compress bool) (*LogFile, error) {
 	return log, nil
 }
 
-func (file *LogFile) Write(r M) {
+func (file *File) Write(r M) {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
 
@@ -60,7 +60,7 @@ func (file *LogFile) Write(r M) {
 	file.changed = true
 }
 
-func (file *LogFile) flush(isClose bool) error {
+func (file *File) flush(isClose bool) error {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
 
@@ -87,11 +87,11 @@ func (file *LogFile) flush(isClose bool) error {
 	return nil
 }
 
-func (file *LogFile) Flush() error {
+func (file *File) Flush() error {
 	return file.flush(false)
 }
 
-func (file *LogFile) Close() error {
+func (file *File) Close() error {
 	if err := file.flush(true); err != nil {
 		return err
 	}
