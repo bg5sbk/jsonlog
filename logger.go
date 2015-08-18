@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,8 +21,8 @@ type Config struct {
 type L struct {
 	config    Config
 	logChan   chan M
-	closeChan chan int
 	closeWait sync.WaitGroup
+	closeFlag uint32
 	file      *File
 }
 
@@ -44,9 +45,8 @@ func New(config Config) (*L, error) {
 	}
 
 	logger := &L{
-		config:    config,
-		closeChan: make(chan int),
-		logChan:   make(chan M, config.LogChanSize),
+		config:  config,
+		logChan: make(chan M, config.LogChanSize),
 	}
 
 	if err := logger.switchFile(); err != nil {
@@ -76,27 +76,26 @@ func (logger *L) loop() {
 
 	for {
 		select {
-		case r := <-logger.logChan:
-			logger.file.Write(r)
+		case r, ok := <-logger.logChan:
+			if ok {
+				logger.file.Write(r)
+			} else {
+				for r := range logger.logChan {
+					logger.file.Write(r)
+				}
+				return
+			}
 		case <-flushTicker.C:
 			if err := logger.file.Flush(); err != nil {
-				log.Println("log flush failed:", err.Error())
+				log.Println("jsonlog flush failed:", err.Error())
+				panic(err)
 			}
 		case <-switchTimer.C:
 			if err := logger.switchFile(); err != nil {
-				println("jsonlog switch file failed: " + err.Error())
+				log.Println("jsonlog switch failed:", err.Error())
 				panic(err)
 			}
 			switchTimer.Reset(logger.config.Switcher.NextSwitchTime())
-		case <-logger.closeChan:
-			for {
-				select {
-				case r := <-logger.logChan:
-					logger.file.Write(r)
-				default:
-					return
-				}
-			}
 		}
 	}
 }
@@ -129,11 +128,15 @@ func (logger *L) switchFile() error {
 
 // 关闭日志系统
 func (logger *L) Close() {
-	close(logger.closeChan)
-	logger.closeWait.Wait()
+	if atomic.CompareAndSwapUint32(&logger.closeFlag, 0, 1) {
+		close(logger.logChan)
+		logger.closeWait.Wait()
+	}
 }
 
 // 在日志文件中输出信息
 func (logger *L) Log(r M) {
-	logger.logChan <- r
+	if atomic.LoadUint32(&logger.closeFlag) == 0 {
+		logger.logChan <- r
+	}
 }

@@ -59,7 +59,7 @@ func (file *File) Write(r M) {
 	defer file.mutex.Unlock()
 
 	if err := file.json.Encode(r); err != nil {
-		log.Println("log write failed:", err.Error())
+		log.Println("jsonlog encode failed:", err.Error())
 	}
 	file.changed = true
 }
