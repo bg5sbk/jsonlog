@@ -7,7 +7,12 @@ import (
 )
 
 func Test_SwitchByDay(t *testing.T) {
-	log, err := New(".", SWITCH_BY_DAY, ".log", false)
+	log, err := New(Config{
+		Dir:      ".",
+		Switcher: DAY_SWITCHER,
+		FileType: ".log",
+		Compress: false,
+	})
 	unitest.NotError(t, err)
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})
@@ -16,7 +21,12 @@ func Test_SwitchByDay(t *testing.T) {
 }
 
 func Test_SwitchByDay_Compress(t *testing.T) {
-	log, err := New(".", SWITCH_BY_DAY, ".log", true)
+	log, err := New(Config{
+		Dir:      ".",
+		Switcher: DAY_SWITCHER,
+		FileType: ".log",
+		Compress: true,
+	})
 	unitest.NotError(t, err)
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})
@@ -25,7 +35,12 @@ func Test_SwitchByDay_Compress(t *testing.T) {
 }
 
 func Test_SwitchByHours(t *testing.T) {
-	log, err := New(".", SWITCH_BY_HOURS, ".log", false)
+	log, err := New(Config{
+		Dir:      ".",
+		Switcher: HOURS_SWITCHER,
+		FileType: ".log",
+		Compress: false,
+	})
 	unitest.NotError(t, err)
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})
@@ -34,7 +49,12 @@ func Test_SwitchByHours(t *testing.T) {
 }
 
 func Test_SwitchByHours_Compress(t *testing.T) {
-	log, err := New(".", SWITCH_BY_HOURS, ".log", true)
+	log, err := New(Config{
+		Dir:      ".",
+		Switcher: HOURS_SWITCHER,
+		FileType: ".log",
+		Compress: true,
+	})
 	unitest.NotError(t, err)
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})
