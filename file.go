@@ -2,7 +2,6 @@ package jsonlog
 
 import (
 	"bufio"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,27 +11,28 @@ import (
 
 type M map[string]interface{}
 
+func fexists(name string) bool {
+	_, err := os.Stat(name)
+	return err == nil
+}
+
 type File struct {
 	mutex   sync.Mutex
 	f       *os.File
-	bufio   *bufio.Writer
-	gzip    *gzip.Writer
+	w       *bufio.Writer
 	json    *json.Encoder
 	changed bool
 }
 
-func NewFile(fileName, fileType string, compress bool) (*File, error) {
+func NewFile(fileName, fileType string, writeBufferSize int) (*File, error) {
 	fullName := fileName + fileType
 
-	if _, err := os.Stat(fullName); err == nil {
+	if fexists(fullName) {
 		os.Rename(fullName, fileName+".01"+fileType)
 		fullName = fileName + ".02" + fileType
-	} else if _, err := os.Stat(fileName + ".01" + fileType); err == nil {
-		for fileId := 1; true; fileId++ {
+	} else {
+		for fileId := 1; fexists(fullName); fileId++ {
 			fullName = fileName + fmt.Sprintf(".%02d", fileId) + fileType
-			if _, err := os.Stat(fullName); err != nil {
-				break
-			}
 		}
 	}
 
@@ -41,17 +41,12 @@ func NewFile(fileName, fileType string, compress bool) (*File, error) {
 		return nil, err
 	}
 
-	log := &File{f: f}
-	if compress {
-		log.bufio = bufio.NewWriter(log.f)
-		log.gzip = gzip.NewWriter(log.bufio)
-		log.json = json.NewEncoder(log.gzip)
-	} else {
-		log.bufio = bufio.NewWriter(log.f)
-		log.json = json.NewEncoder(log.bufio)
-	}
-
-	return log, nil
+	w := bufio.NewWriterSize(f, writeBufferSize)
+	return &File{
+		f:    f,
+		w:    w,
+		json: json.NewEncoder(w),
+	}, nil
 }
 
 func (file *File) Write(r M) {
@@ -64,7 +59,7 @@ func (file *File) Write(r M) {
 	file.changed = true
 }
 
-func (file *File) flush(isClose bool) error {
+func (file *File) Flush() error {
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
 
@@ -72,18 +67,7 @@ func (file *File) flush(isClose bool) error {
 		return nil
 	}
 
-	if file.gzip != nil {
-		if err := file.gzip.Flush(); err != nil {
-			return err
-		}
-		if isClose {
-			if err := file.gzip.Close(); err != nil {
-				return err
-			}
-		}
-	}
-
-	if err := file.bufio.Flush(); err != nil {
+	if err := file.w.Flush(); err != nil {
 		return err
 	}
 
@@ -95,12 +79,8 @@ func (file *File) flush(isClose bool) error {
 	return nil
 }
 
-func (file *File) Flush() error {
-	return file.flush(false)
-}
-
 func (file *File) Close() error {
-	if err := file.flush(true); err != nil {
+	if err := file.Flush(); err != nil {
 		return err
 	}
 	return file.f.Close()

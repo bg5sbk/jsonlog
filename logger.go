@@ -9,21 +9,23 @@ import (
 )
 
 type Config struct {
-	Dir         string
-	Switcher    Switcher
-	FileType    string
-	Compress    bool
-	FlushTick   time.Duration
-	LogChanSize int
+	Dir             string
+	Switcher        Switcher
+	FileType        string
+	WriteBufferSize int
+	FlushTick       time.Duration
+	LogChanSize     int
 }
 
 // 日志记录器
 type L struct {
-	config    Config
-	logChan   chan M
-	closeWait sync.WaitGroup
-	closeFlag uint32
-	file      *File
+	config     Config
+	logChan    chan M
+	closeChan  chan int
+	closeWait  sync.WaitGroup
+	closeMutex sync.RWMutex
+	closeFlag  int32
+	file       *File
 }
 
 // 新建一个日志记录器
@@ -32,8 +34,8 @@ func New(config Config) (*L, error) {
 		config.FileType = "." + config.FileType
 	}
 
-	if config.Compress {
-		config.FileType += ".gz"
+	if config.WriteBufferSize <= 0 {
+		config.WriteBufferSize = 4096
 	}
 
 	if config.FlushTick <= 0 {
@@ -67,12 +69,13 @@ func (logger *L) loop() {
 		logger.closeWait.Done()
 	}()
 
-	// 定时切换文件
-	switchTimer := time.NewTimer(logger.config.Switcher.FirstSwitchTime())
-
 	// 定时刷新文件
 	flushTicker := time.NewTicker(logger.config.FlushTick)
 	defer flushTicker.Stop()
+
+	// 定时切换文件
+	switchTimer := time.NewTimer(logger.config.Switcher.FirstSwitchTime())
+	defer switchTimer.Stop()
 
 	for {
 		select {
@@ -117,26 +120,44 @@ func (logger *L) switchFile() error {
 	}
 
 	// 创建或者打开已存在文件
-	file, err := NewFile(fileName, logger.config.FileType, logger.config.Compress)
+	file, err := NewFile(fileName, logger.config.FileType, logger.config.WriteBufferSize)
 	if err != nil {
 		return err
 	}
 	logger.file = file
-
 	return nil
 }
 
 // 关闭日志系统
 func (logger *L) Close() {
-	if atomic.CompareAndSwapUint32(&logger.closeFlag, 0, 1) {
-		close(logger.logChan)
-		logger.closeWait.Wait()
+	if atomic.LoadInt32(&logger.closeFlag) == 1 {
+		return
 	}
+
+	logger.closeMutex.Lock()
+	defer logger.closeMutex.Unlock()
+
+	if atomic.LoadInt32(&logger.closeFlag) == 1 {
+		return
+	}
+
+	atomic.StoreInt32(&logger.closeFlag, 1)
+	close(logger.logChan)
+	logger.closeWait.Wait()
 }
 
 // 在日志文件中输出信息
 func (logger *L) Log(r M) {
-	if atomic.LoadUint32(&logger.closeFlag) == 0 {
-		logger.logChan <- r
+	if atomic.LoadInt32(&logger.closeFlag) == 1 {
+		return
 	}
+
+	logger.closeMutex.RLock()
+	defer logger.closeMutex.RUnlock()
+
+	if atomic.LoadInt32(&logger.closeFlag) == 1 {
+		return
+	}
+
+	logger.logChan <- r
 }

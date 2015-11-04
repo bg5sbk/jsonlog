@@ -55,6 +55,6 @@ func (_ hoursSwitch) NextSwitchTime() time.Duration {
 func (_ hoursSwitch) DirAndFileName(base string) (dir, file string) {
 	now := time.Now()
 	dir = base + "/" + now.Format("2006-01/2006-01-02/")
-	file = dir + now.Format("2006-01-02_03")
+	file = dir + now.Format("2006-01-02_15")
 	return
 }
