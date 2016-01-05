@@ -1,9 +1,10 @@
 package jsonlog
 
 import (
-	"github.com/funny/utest"
 	"testing"
 	"time"
+
+	"github.com/funny/utest"
 )
 
 func Test_SwitchByDay(t *testing.T) {
@@ -12,7 +13,7 @@ func Test_SwitchByDay(t *testing.T) {
 		Switcher: DAY_SWITCHER,
 		FileType: ".log",
 	})
-	utest.NotError(t, err)
+	utest.IsNilNow(t, err)
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})
@@ -25,7 +26,7 @@ func Test_SwitchByHours(t *testing.T) {
 		Switcher: HOURS_SWITCHER,
 		FileType: ".log",
 	})
-	utest.NotError(t, err)
+	utest.IsNilNow(t, err)
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})
 	log.Log(M{"Time": time.Now()})

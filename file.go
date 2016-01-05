@@ -25,15 +25,10 @@ type File struct {
 }
 
 func NewFile(fileName, fileType string, writeBufferSize int) (*File, error) {
-	fullName := fileName + fileType
+	fullName := fileName + ".01" + fileType
 
-	if fexists(fullName) {
-		os.Rename(fullName, fileName+".01"+fileType)
-		fullName = fileName + ".02" + fileType
-	} else {
-		for fileId := 1; fexists(fullName); fileId++ {
-			fullName = fileName + fmt.Sprintf(".%02d", fileId) + fileType
-		}
+	for fileID := 2; fexists(fullName); fileID++ {
+		fullName = fileName + fmt.Sprintf(".%02d", fileID) + fileType
 	}
 
 	f, err := os.OpenFile(fullName, os.O_WRONLY|os.O_CREATE, 0755)
